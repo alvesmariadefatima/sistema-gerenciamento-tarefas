@@ -1,85 +1,54 @@
 <?php
-
 require __DIR__ . '/connect.php';
-
 session_start();
 
 if (!isset($_SESSION['tasks'])) {
     $_SESSION['tasks'] = array();
 }
 
+// Fetch tasks
 $stmt_fetch = $conn->prepare("SELECT * FROM tasks");
 $stmt_fetch->execute();
 $stmt_fetch->setFetchMode(PDO::FETCH_ASSOC);
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    // Handle file upload
+    $file_name = '';
+    if (isset($_FILES['task_image']) && $_FILES['task_image']['error'] == 0) {
+        $ext = strtolower(pathinfo($_FILES['task_image']['name'], PATHINFO_EXTENSION));
+        $file_name = md5(date('Y.m.d.H.i.s')) . '.' . $ext;
+        $dir = 'uploads/';
 
-if(isset($_POST['task_name']) && !empty($_POST['task_name'])) {
-    $stmt = $conn->prepare('INSERT INTO tasks (task_name, task_description, task_image, task_date) 
-    VALUES (:name, :description, :image, :date)');
-    $stmt->bindParam(':name', $_POST['task_name'], PDO::PARAM_STR);
-    $stmt->bindParam(':description', $_POST['task_description'], PDO::PARAM_STR);
+        if (!is_dir($dir)) {
+            mkdir($dir, 0755, true);
+        }
 
-    // Verifica se $file_name não está vazio antes de atribuí-lo a task_image
-    if (!empty($file_name)) {
-    $stmt->bindParam(':image', $file_name, PDO::PARAM_STR);
-    } else {
-    // Se $file_name estiver vazio, define task_image como NULL
-    $stmt->bindValue(':image', null, PDO::PARAM_NULL);
+        if (!move_uploaded_file($_FILES['task_image']['tmp_name'], $dir . $file_name)) {
+            $_SESSION['message'] = "Falha ao mover o arquivo para a pasta de uploads.";
+        }
     }
 
-    $stmt->bindParam(':date', $_POST['task_date'], PDO::PARAM_STR);
-
-    try {
-        if (!empty($file_name)) {
-            // A variável $file_name não está vazia, então pode ser usada na consulta
-            $stmt = $conn->prepare('INSERT INTO tasks (task_name, task_description, task_image, task_date) 
-                                    VALUES (:name, :description, :image, :date)');
-            $stmt->bindParam(':image', $file_name, PDO::PARAM_STR);
-        } else {
-            // A variável $file_name está vazia, então definimos task_image como NULL
-            $stmt = $conn->prepare('INSERT INTO tasks (task_name, task_description, task_date) 
-                                    VALUES (:name, :description, :date)');
-        }
-    
-        // Bind dos outros parâmetros e execução da consulta
+    if (isset($_POST['task_name']) && !empty($_POST['task_name'])) {
+        $stmt = $conn->prepare('INSERT INTO tasks (task_name, task_description, task_image, task_date) 
+                                VALUES (:name, :description, :image, :date)');
         $stmt->bindParam(':name', $_POST['task_name'], PDO::PARAM_STR);
         $stmt->bindParam(':description', $_POST['task_description'], PDO::PARAM_STR);
-        $stmt->bindParam(':date', $_POST['task_date'], PDO::PARAM_STR);
-    
-        if($stmt->execute()) {
-            $_SESSION['success'] = "Dados cadastrados";
+        if (!empty($file_name)) {
+            $stmt->bindParam(':image', $file_name, PDO::PARAM_STR);
         } else {
-            $_SESSION['error'] = "Dados não cadastrados";
+            $stmt->bindValue(':image', null, PDO::PARAM_NULL);
         }
-    } catch(PDOException $e) {
-        // Captura a exceção e exibe uma mensagem de erro mais detalhada
-        $_SESSION['error'] = "Erro ao executar a consulta: " . $e->getMessage();
-    }    
-}    
+        $stmt->bindParam(':date', $_POST['task_date'], PDO::PARAM_STR);
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (isset($_POST['task_name']) && $_POST['task_name'] != "") {
-        $task_image = '';
-        if (isset($_FILES['task_image']) && $_FILES['task_image']['error'] == 0) {
-            $ext = strtolower(pathinfo($_FILES['task_image']['name'], PATHINFO_EXTENSION));
-            $file_name = md5(date('Y.m.d.H.i.s')) . '.' . $ext;
-            $dir = 'uploads/';
-
-            if (!is_dir($dir)) {
-                mkdir($dir, 0755, true);
-            }
-
-            if (move_uploaded_file($_FILES['task_image']['tmp_name'], $dir . $file_name)) {
-                $task_image = $file_name;
+        try {
+            if ($stmt->execute()) {
+                $_SESSION['success'] = "Dados cadastrados";
             } else {
-                $_SESSION['message'] = "Falha ao mover o arquivo para a pasta de uploads.";
+                $_SESSION['error'] = "Dados não cadastrados";
             }
+        } catch (PDOException $e) {
+            $_SESSION['error'] = "Erro ao executar a consulta: " . $e->getMessage();
         }
-
-        $task_description = $_POST['task_description'] ?? '';
-        $task_date = $_POST['task_date'] ?? '';
-
-        $_SESSION['tasks'][] = $data;
     } else {
         $_SESSION['message'] = "O campo nome da tarefa não pode ser vazio!";
     }
@@ -113,18 +82,16 @@ if (isset($_GET['clear'])) {
 <body>
     <div class="container">
         <?php 
-            if(isset($_SESSION['sucess'])) {
-
+            if(isset($_SESSION['success'])) {
         ?>
-            <div class="alert-sucess"><?php echo $_SESSION['sucess']; ?></div>
+            <div class="alert-success"><?php echo $_SESSION['success']; ?></div>
         <?php
-            unset($_SESSION['sucess']);
+            unset($_SESSION['success']);
             }
         ?>
 
         <?php 
             if(isset($_SESSION['error'])) {
-
         ?>
             <div class="alert-error"><?php echo $_SESSION['error']; ?></div>
         <?php
@@ -153,19 +120,11 @@ if (isset($_GET['clear'])) {
         
         <div class="list-tasks">
             <?php
-            if (!empty($_SESSION['tasks'])) {
+            if (!empty($stmt_fetch)) {
                 echo "<ul>";
                 foreach ($stmt_fetch->fetchAll() as $task) {
                     echo "<li>
-                        <a href='details.php?key=" . $task['id'] . "'>" . $task['task_name'] . "</a>
-                        <button type='button' class='btn-clear' onclick='deletar".$task['id']."()'>Remover</button>
-                        <script>
-                        function deletar".$task['id']."() {
-                            if (confirm('Confirmar remoção?')) {
-                                window.location = 'http://localhost/gerenciador-tarefas/gerenciador_tarefas/details.php?key=".$task['id']."';
-                            }
-                        }
-                        </script>
+                        <a href='details.php?key=" . $task['id'] . "'>" . $task['task_name'] . "</a>             
                     </li>";
                 }
                 echo "</ul>";
